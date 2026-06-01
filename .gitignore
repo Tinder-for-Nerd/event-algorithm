@@ -1,4 +1,11 @@
-node_modules/
+/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.venv
+env/
+venv/node_modules/
 dist/
 .vite/
 .tools/
