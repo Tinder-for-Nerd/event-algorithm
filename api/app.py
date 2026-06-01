@@ -207,6 +207,8 @@ async def upload_and_score(
 
     return {
         "file": file.filename,
+        "pdf_name": file.filename,
+        "file_name": file.filename,
         "results": results,
         "domain_scores": profile.domain_scores,
         "top_domain": profile.top_domain,
