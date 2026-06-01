@@ -389,3 +389,20 @@ def build_domain_profile(scored_skills: Sequence[SkillScore]) -> DomainProfile:
 		total_skill_score=sum(skill.final_score for skill in scored_skills) / len(scored_skills),
 	)
 
+
+def rank_events_from_scored_skills(
+	scored_skills: Sequence[SkillScore],
+	events: Sequence[Event],
+	config: ScoringConfig | None = None,
+) -> tuple[DomainProfile, list[dict]]:
+	"""Convert skill score results into the event-search input and rank events.
+
+	This is the explicit bridge between the resume skill scoring output and the event
+	matching algorithm.
+	"""
+	config = config or ScoringConfig()
+	profile = build_domain_profile(scored_skills)
+	ranked_events = [score_event_for_user(profile.weighted_skill_vector, event, config) for event in events]
+	ranked_events.sort(key=lambda item: item.get("final_score", 0.0), reverse=True)
+	return profile, ranked_events
+

@@ -16,6 +16,7 @@ from skillscore_algorithm.core import (
     Event,
     score_event_for_user,
     build_domain_profile,
+    rank_events_from_scored_skills,
 )
 import io
 try:
@@ -302,30 +303,30 @@ async def upload_and_score(
         scored_skills.append(scored)
         results.append({"extracted": ex.__dict__, "score": scored.__dict__})
 
-    profile = build_domain_profile(scored_skills)
-
-    ranked_events = []
     event_dicts = _load_event_dicts(events)
-    for item in event_dicts:
-        event_obj = Event(
+    event_objects = [
+        Event(
             id=item["id"],
             title=item["title"],
             required_skills=item["required_skills"],
             start_time=item.get("start_time"),
             popularity=item.get("popularity", 0.5),
         )
-        ranked_events.append(score_event_for_user(profile.weighted_skill_vector, event_obj, ScoringConfig()))
-    ranked_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
+        for item in event_dicts
+    ]
+    profile, ranked_events = rank_events_from_scored_skills(scored_skills, event_objects, ScoringConfig())
 
     return {
         "file": file.filename,
         "pdf_name": file.filename,
         "file_name": file.filename,
+        "skill_score_results": results,
         "results": results,
         "domain_scores": profile.domain_scores,
         "top_domain": profile.top_domain,
         "total_skill_score": profile.total_skill_score,
         "weighted_skill_vector": profile.weighted_skill_vector,
+        "event_search_vector": profile.weighted_skill_vector,
         "ranked_events": ranked_events,
         "used_default_taxonomy": not bool(_normalize_form_text(taxonomy)),
         "used_default_events": not bool(_normalize_form_text(events)),
@@ -336,21 +337,16 @@ async def upload_and_score(
 def search_events(req: SearchEventsRequest):
     # Build user skill scores
     scored = [score_skill(SkillEvidence(**s.model_dump()), ScoringConfig()) for s in req.skills]
-    profile = build_domain_profile(scored)
-
-    # Score each event
-    scored_events = []
-    for ev in req.events:
-        event_obj = Event(id=ev.id, title=ev.title, required_skills=ev.required_skills, start_time=ev.start_time, popularity=ev.popularity or 0.5)
-        details = score_event_for_user(profile.weighted_skill_vector, event_obj, ScoringConfig())
-        scored_events.append(details)
-
-    # Sort by final_score desc
-    scored_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
+    event_objects = [
+        Event(id=ev.id, title=ev.title, required_skills=ev.required_skills, start_time=ev.start_time, popularity=ev.popularity or 0.5)
+        for ev in req.events
+    ]
+    profile, scored_events = rank_events_from_scored_skills(scored, event_objects, ScoringConfig())
     return {
         "top_k": req.top_k,
         "domain_scores": profile.domain_scores,
         "top_domain": profile.top_domain,
         "total_skill_score": profile.total_skill_score,
+        "event_search_vector": profile.weighted_skill_vector,
         "results": scored_events[: req.top_k],
     }

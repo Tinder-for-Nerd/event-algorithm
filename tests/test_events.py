@@ -46,6 +46,7 @@ class EventSearchTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertIn("results", body)
+        self.assertIn("event_search_vector", body)
         results = body["results"]
         self.assertGreaterEqual(len(results), 1)
         # Top result should be the Python event
@@ -81,8 +82,10 @@ class EventSearchTests(unittest.TestCase):
         body = resp.json()
         self.assertEqual(body["pdf_name"], "resume.txt")
         self.assertEqual(body["file_name"], "resume.txt")
+        self.assertEqual(body["skill_score_results"], body["results"])
         self.assertIn("domain_scores", body)
         self.assertIn("ranked_events", body)
+        self.assertIn("event_search_vector", body)
         self.assertNotIn("Other", body["domain_scores"])
         self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
 
@@ -112,6 +115,7 @@ class EventSearchTests(unittest.TestCase):
         self.assertTrue(body["used_default_events"])
         self.assertIn("Full-Stack Development", body["domain_scores"])
         self.assertGreaterEqual(len(body["ranked_events"]), 1)
+        self.assertIn("event_search_vector", body)
 
 
 if __name__ == "__main__":
