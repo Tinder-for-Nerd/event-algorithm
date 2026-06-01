@@ -1,0 +1,181 @@
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from typing import List, Dict, Any
+import json
+import subprocess
+from skillscore_algorithm.core import (
+    SkillEvidence,
+    ScoringConfig,
+    score_skill,
+    aggregate_domain_score,
+    DomainDefinition,
+    SkillTaxonomyEntry,
+    extract_exact_skill_mentions,
+    Event,
+    score_event_for_user,
+)
+import io
+try:
+    import PyPDF2
+except Exception:
+    PyPDF2 = None
+
+
+app = FastAPI(title="Skillscore Algorithm API")
+
+
+class SkillInput(BaseModel):
+    name: str
+    domain: str
+    months_since_use: float
+    role_months: float
+    seniority_level: str = "used"
+    endorsement_count: int = 0
+    self_reported_level: str | float = "Intermediate"
+
+
+class CombineRequest(BaseModel):
+    skills: List[SkillInput]
+    domain_key_skills: Dict[str, List[str]] = {}
+    node_options: Dict[str, Any] = {}
+
+
+class EventInput(BaseModel):
+    id: str
+    title: str
+    required_skills: Dict[str, float]
+    start_time: str | None = None
+    popularity: float | None = 0.5
+
+
+class SearchEventsRequest(BaseModel):
+    skills: List[SkillInput]
+    events: List[EventInput]
+    top_k: int = 10
+
+
+@app.post("/score_skill")
+def api_score_skill(skill: SkillInput):
+    evidence = SkillEvidence(
+        name=skill.name,
+        domain=skill.domain,
+        months_since_use=skill.months_since_use,
+        role_months=skill.role_months,
+        seniority_level=skill.seniority_level,
+        endorsement_count=skill.endorsement_count,
+        self_reported_level=skill.self_reported_level,
+    )
+    scored = score_skill(evidence, ScoringConfig())
+    return scored.__dict__
+
+
+@app.post("/combine")
+def api_combine(req: CombineRequest):
+    # Score each skill
+    scored = [score_skill(SkillEvidence(**s.dict()), ScoringConfig()) for s in req.skills]
+
+    # Build domain vectors and aggregate
+    domain_scores: Dict[str, float] = {}
+    for domain_name, keys in req.domain_key_skills.items():
+        skill_map = {s.name: s.final_score for s in scored if s.domain == domain_name}
+        domain_scores[domain_name] = aggregate_domain_score(skill_map, DomainDefinition(name=domain_name, key_skills=tuple(keys)))
+
+    # Call node recommendation engine
+    try:
+        options_json = json.dumps(req.node_options or {})
+        cmd = f"node tools/run_recommendation.js '{options_json}'"
+        process = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        if process.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Node runner failed: {process.stderr}")
+        node_result = json.loads(process.stdout)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "domain_scores": domain_scores,
+        "node_recommendations": node_result,
+    }
+
+
+@app.post("/upload_and_score")
+async def upload_and_score(
+    file: UploadFile = File(...),
+    taxonomy: str | None = Form(None),
+    role_months: float = Form(12.0),
+    months_since_use: float = Form(1.0),
+    seniority_level: str = Form("used"),
+    endorsement_count: int = Form(0),
+    self_reported_level: str | float = Form("Intermediate"),
+):
+    """Upload a resume/text or PDF and score detected skills.
+
+    - `taxonomy` is an optional JSON string array of objects: {canonical_name, domain, aliases}
+    """
+    content = None
+    try:
+        data = await file.read()
+        fname = (file.filename or "").lower()
+        if fname.endswith(".pdf") and PyPDF2 is not None:
+            reader = PyPDF2.PdfReader(io.BytesIO(data))
+            texts = [p.extract_text() or "" for p in reader.pages]
+            content = "\n".join(texts)
+        else:
+            # assume plain text
+            content = data.decode("utf-8", errors="ignore")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {e}")
+
+    taxonomy_entries: List[SkillTaxonomyEntry] = []
+    if taxonomy:
+        try:
+            parsed = json.loads(taxonomy)
+            for item in parsed:
+                taxonomy_entries.append(
+                    SkillTaxonomyEntry(
+                        canonical_name=item.get("canonical_name") or item.get("name"),
+                        domain=item.get("domain", "Unknown"),
+                        aliases=tuple(item.get("aliases", [])),
+                    )
+                )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid taxonomy JSON: {e}")
+
+    if not taxonomy_entries:
+        raise HTTPException(status_code=400, detail="No taxonomy provided — taxonomy JSON form field is required")
+
+    extracted = extract_exact_skill_mentions(content, taxonomy_entries)
+
+    results = []
+    for ex in extracted:
+        evidence = SkillEvidence(
+            name=ex.canonical_name,
+            domain=ex.domain,
+            months_since_use=months_since_use,
+            role_months=role_months,
+            seniority_level=seniority_level,
+            endorsement_count=endorsement_count,
+            self_reported_level=self_reported_level,
+        )
+        scored = score_skill(evidence, ScoringConfig())
+        results.append({"extracted": ex.__dict__, "score": scored.__dict__})
+
+    return {"file": file.filename, "results": results}
+
+
+@app.post("/search_events")
+def search_events(req: SearchEventsRequest):
+    # Build user skill scores
+    scored = [score_skill(SkillEvidence(**s.dict()), ScoringConfig()) for s in req.skills]
+    user_vector = {s.name: s.final_score for s in scored}
+    scored_count = len([s for s in scored if s.final_score > 0])
+
+    # Score each event
+    scored_events = []
+    for ev in req.events:
+        event_obj = Event(id=ev.id, title=ev.title, required_skills=ev.required_skills, start_time=ev.start_time, popularity=ev.popularity or 0.5)
+        details = score_event_for_user(user_vector, event_obj, ScoringConfig())
+        scored_events.append(details)
+
+    # Sort by final_score desc
+    scored_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
+    return {"top_k": req.top_k, "results": scored_events[: req.top_k]}
