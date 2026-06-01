@@ -1,70 +1,93 @@
-# ProMatch Recommendation Algorithm
+# Skillscore & Recommendation Algorithm
 
-This project now contains only the Student/Pro recommendation algorithm. The website, React routes, Vite shell, styles, and UI components have been removed.
+A dual-engine system designed to score professional skills and provide intelligent recommendations for profiles and events. This project combines a Python-based skill analysis engine with a Node.js-based recommendation algorithm.
 
-## Core Flow
+## 🚀 Overview
 
-Both user types feed into the same engine:
+The system operates in two main phases:
+1.  **Skill Analysis (Python/FastAPI):** Parses resumes (PDF or text), extracts skills based on a master taxonomy, and calculates a multidimensional "Skill Score" considering recency, duration, seniority, and endorsements.
+2.  **Recommendation Engine (Node.js):** Takes scored skill profiles and ranks events and other profiles using weights tailored to user types (Student vs. Pro), incorporating a feedback loop for continuous improvement.
+
+---
+
+## 🛠️ Features
+
+### Skill Scoring Engine (Python)
+-   **PDF Resume Parsing:** Automatic text extraction from PDF resumes.
+-   **Taxonomy-Based Extraction:** Intelligent skill detection using a customizable `master_taxonomy.json`.
+-   **Weighted Scoring:** Sophisticated algorithm calculating:
+    -   `Recency Score`: Decays over time (tau = 24 months).
+    -   `Duration Score`: Logarithmic normalization of experience.
+    -   `Seniority Score`: Based on role level (Used, Built, Led, Expert).
+    -   `Endorsement Bonus`: Quantitative validation of skills.
+-   **FastAPI Interface:** Modern RESTful API with a built-in demo UI.
+
+### Recommendation Engine (Node.js)
+-   **Dual Scoring Modes:**
+    -   *Student Mode*: Prioritizes skill overlap (weight: 0.50).
+    -   *Pro Mode*: Prioritizes mutual connections (weight: 0.40).
+-   **Feedback Loop:** Updates rankings in real-time based on user signals (Connect, RSVP, Dwell).
+-   **Exploration Slot:** Reserves 10% for "discovery" items to avoid echo chambers.
+-   **Pure Algorithm:** Decoupled from any UI for maximum portability.
+
+---
+
+## 📂 Project Structure
 
 ```text
-userSignal -> scoreProfiles.js + scoreEvents.js -> recommendationEngine.js
+├── api/                    # FastAPI Application
+│   └── app.py              # Main API endpoints and demo UI logic
+├── skillscore_algorithm/   # Core Python logic
+│   └── core.py             # Skill scoring and event ranking algorithms
+├── src/                    # Node.js Recommendation Engine
+│   ├── index.js            # Public exports
+│   ├── recommendationEngine.js
+│   └── features/           # Scorer and signal logic
+├── data/                   # JSON Taxonomy and sample datasets
+├── tests/                  # Python unit tests
+├── test/                   # Node.js unit tests
+└── tools/                  # Utility scripts (e.g., Node runner for Python)
 ```
 
-The key difference is the scorer weight:
+---
 
-- Student profile scoring gives skill overlap the highest weight at `0.50`.
-- Pro profile scoring gives mutual connections the highest weight at `0.40`.
+## 🚦 Getting Started
 
-Both modes return:
+### Python (Skill Scoring API)
+1.  **Install Dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+2.  **Run the API:**
+    ```bash
+    uvicorn api.app:app --reload
+    ```
+3.  **Access the UI:** Open `http://120.0.0.1:8000` to use the interactive resume uploader.
 
-- ranked profile cards
-- ranked event cards
-- a 10% exploration slot
-- updated ranking after connect, RSVP, or dwell feedback
+### Node.js (Recommendation Engine)
+1.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
+2.  **Run Demo:**
+    ```bash
+    npm run demo
+    ```
+3.  **Run Tests:**
+    ```bash
+    npm test
+    ```
 
-## Run
+---
 
-Use Node.js 18 or newer.
+## 🧪 API Endpoints
 
-```bash
-npm install
-npm run demo
-```
+-   `POST /upload_and_score`: Accepts a PDF/Text file and returns extracted skills, domain scores, and ranked events.
+-   `POST /score_skill`: Detailed scoring for a single skill input.
+-   `POST /combine`: Orchestrates both engines to provide comprehensive domain and node recommendations.
+-   `POST /search_events`: Ranks a list of events against a user's skill profile.
 
-If this Windows machine still cannot find global `npm`, use the portable Node already in `.tools`:
+---
 
-```powershell
-$env:PATH = "$PWD\.tools\node-v20.12.2-win-x64;$env:PATH"
-.\.tools\node-v20.12.2-win-x64\npm.cmd install
-.\.tools\node-v20.12.2-win-x64\npm.cmd run demo
-```
-
-## Test
-
-```bash
-npm test
-```
-
-## Main Files
-
-- `src/recommendationEngine.js` - pure algorithm API
-- `src/index.js` - public exports
-- `src/data/recommendationData.js` - sample profile and event catalog
-- `src/features/recommendations/userSignal.js` - signal creation and feedback reducer
-- `src/features/recommendations/scoreProfiles.js` - Student/Pro profile scoring
-- `src/features/recommendations/scoreEvents.js` - Student/Pro event scoring
-- `test/recommendationEngine.test.js` - algorithm checks
-
-## API Example
-
-```js
-import { applyFeedback, createUserSignal, getRecommendations } from "./src/index.js";
-
-const signal = createUserSignal("student");
-const firstRun = getRecommendations({ signal });
-const updatedSignal = applyFeedback(signal, {
-  type: "connect",
-  profile: firstRun.profileCards[0]
-});
-const secondRun = getRecommendations({ signal: updatedSignal });
-```
+## 📄 License
+This project is licensed under the MIT License - see the `LICENSE` file for details.
