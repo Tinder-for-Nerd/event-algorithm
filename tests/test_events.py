@@ -10,6 +10,11 @@ class EventSearchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
 
+    def test_home_page_loads(self):
+        resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Skillscore FastAPI Demo", resp.text)
+
     def test_search_events_prefers_matching_skills(self):
         payload = {
             "skills": [
@@ -80,16 +85,19 @@ class EventSearchTests(unittest.TestCase):
         self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
 
     def test_upload_resume_uses_default_taxonomy_when_blank(self):
-        files = {"file": ("resume.txt", b"Python Frontend AI", "text/plain")}
+        files = {"file": ("resume.txt", b"Python Frontend AI Pandas", "text/plain")}
         data = {"taxonomy": ""}
 
         resp = self.client.post("/upload_and_score", files=files, data=data)
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["pdf_name"], "resume.txt")
+        self.assertTrue(body["used_default_events"])
         self.assertIn("domain_scores", body)
         self.assertIn("Full-Stack Development", body["domain_scores"])
         self.assertIn("Artificial Intelligence & Machine Learning", body["domain_scores"])
+        self.assertGreaterEqual(len(body["ranked_events"]), 1)
+        self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
 
 
 if __name__ == "__main__":

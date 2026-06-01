@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from pathlib import Path
@@ -26,6 +27,7 @@ except Exception:
 app = FastAPI(title="Skillscore Algorithm API")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_TAXONOMY_PATH = BASE_DIR / "data" / "master_taxonomy.json"
+DEFAULT_EVENTS_PATH = BASE_DIR / "data" / "sample_events.json"
 
 
 def _load_taxonomy_entries(taxonomy: str | None) -> List[SkillTaxonomyEntry]:
@@ -51,6 +53,29 @@ def _load_taxonomy_entries(taxonomy: str | None) -> List[SkillTaxonomyEntry]:
             )
         )
     return taxonomy_entries
+
+
+def _load_event_dicts(events: str | None) -> List[Dict[str, Any]]:
+    raw_text = (events or "").strip()
+    if not raw_text:
+        raw_text = DEFAULT_EVENTS_PATH.read_text(encoding="utf-8")
+
+    try:
+        parsed = json.loads(raw_text)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid events JSON: {e}")
+
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=400, detail="Invalid events JSON: expected a list of event objects")
+
+    event_dicts: List[Dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("id") or not item.get("title") or not item.get("required_skills"):
+            continue
+        event_dicts.append(item)
+    return event_dicts
 
 
 class SkillInput(BaseModel):
@@ -89,6 +114,26 @@ class UploadEventInput(BaseModel):
     required_skills: Dict[str, float]
     start_time: str | None = None
     popularity: float | None = 0.5
+
+
+@app.get("/", response_class=HTMLResponse)
+def home_page() -> HTMLResponse:
+        return HTMLResponse(
+                """
+                <html>
+                    <head><title>Skillscore FastAPI Demo</title></head>
+                    <body style="font-family: Arial, sans-serif; max-width: 720px; margin: 40px auto; line-height: 1.5;">
+                        <h1>Skillscore FastAPI Demo</h1>
+                        <p>Upload a resume PDF or text file. The API will use the built-in taxonomy and sample events automatically.</p>
+                        <form action="/upload_and_score" method="post" enctype="multipart/form-data">
+                            <p><input type="file" name="file" accept=".pdf,.txt" required></p>
+                            <p><button type="submit">Upload and Score</button></p>
+                        </form>
+                        <p>For JSON APIs, use <code>/docs</code> or call <code>/upload_and_score</code> directly.</p>
+                    </body>
+                </html>
+                """
+        )
 
 
 @app.post("/score_skill")
@@ -189,21 +234,17 @@ async def upload_and_score(
     profile = build_domain_profile(scored_skills)
 
     ranked_events = []
-    if events:
-        try:
-            parsed_events = json.loads(events)
-            for item in parsed_events:
-                event_obj = Event(
-                    id=item["id"],
-                    title=item["title"],
-                    required_skills=item["required_skills"],
-                    start_time=item.get("start_time"),
-                    popularity=item.get("popularity", 0.5),
-                )
-                ranked_events.append(score_event_for_user(profile.weighted_skill_vector, event_obj, ScoringConfig()))
-            ranked_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid events JSON: {e}")
+    event_dicts = _load_event_dicts(events)
+    for item in event_dicts:
+        event_obj = Event(
+            id=item["id"],
+            title=item["title"],
+            required_skills=item["required_skills"],
+            start_time=item.get("start_time"),
+            popularity=item.get("popularity", 0.5),
+        )
+        ranked_events.append(score_event_for_user(profile.weighted_skill_vector, event_obj, ScoringConfig()))
+    ranked_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
 
     return {
         "file": file.filename,
@@ -215,6 +256,7 @@ async def upload_and_score(
         "total_skill_score": profile.total_skill_score,
         "weighted_skill_vector": profile.weighted_skill_vector,
         "ranked_events": ranked_events,
+        "used_default_events": not bool((events or "").strip()),
     }
 
 
