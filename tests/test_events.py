@@ -80,7 +80,7 @@ class EventSearchTests(unittest.TestCase):
         self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
 
     def test_upload_resume_uses_default_taxonomy_when_blank(self):
-        files = {"file": ("resume.txt", b"Python Music Director", "text/plain")}
+        files = {"file": ("resume.txt", b"Python Frontend AI", "text/plain")}
         data = {"taxonomy": ""}
 
         resp = self.client.post("/upload_and_score", files=files, data=data)
@@ -88,8 +88,8 @@ class EventSearchTests(unittest.TestCase):
         body = resp.json()
         self.assertEqual(body["pdf_name"], "resume.txt")
         self.assertIn("domain_scores", body)
-        self.assertIn("Software", body["domain_scores"])
-        self.assertIn("Arts", body["domain_scores"])
+        self.assertIn("Full-Stack Development", body["domain_scores"])
+        self.assertIn("Artificial Intelligence & Machine Learning", body["domain_scores"])
 
 
 if __name__ == "__main__":
