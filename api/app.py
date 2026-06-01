@@ -30,8 +30,15 @@ DEFAULT_TAXONOMY_PATH = BASE_DIR / "data" / "master_taxonomy.json"
 DEFAULT_EVENTS_PATH = BASE_DIR / "data" / "sample_events.json"
 
 
+def _normalize_form_text(value: str | None) -> str:
+    text = (value or "").strip()
+    if text.lower() in {"", "string", "null", "none"}:
+        return ""
+    return text
+
+
 def _load_taxonomy_entries(taxonomy: str | None) -> List[SkillTaxonomyEntry]:
-    raw_text = (taxonomy or "").strip()
+    raw_text = _normalize_form_text(taxonomy)
     if not raw_text:
         raw_text = DEFAULT_TAXONOMY_PATH.read_text(encoding="utf-8")
 
@@ -56,7 +63,7 @@ def _load_taxonomy_entries(taxonomy: str | None) -> List[SkillTaxonomyEntry]:
 
 
 def _load_event_dicts(events: str | None) -> List[Dict[str, Any]]:
-    raw_text = (events or "").strip()
+    raw_text = _normalize_form_text(events)
     if not raw_text:
         raw_text = DEFAULT_EVENTS_PATH.read_text(encoding="utf-8")
 
@@ -320,7 +327,8 @@ async def upload_and_score(
         "total_skill_score": profile.total_skill_score,
         "weighted_skill_vector": profile.weighted_skill_vector,
         "ranked_events": ranked_events,
-        "used_default_events": not bool((events or "").strip()),
+        "used_default_taxonomy": not bool(_normalize_form_text(taxonomy)),
+        "used_default_events": not bool(_normalize_form_text(events)),
     }
 
 

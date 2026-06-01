@@ -101,6 +101,18 @@ class EventSearchTests(unittest.TestCase):
         self.assertGreaterEqual(len(body["ranked_events"]), 1)
         self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
 
+    def test_upload_resume_ignores_swagger_placeholder_strings(self):
+        files = {"file": ("resume.txt", b"Python Frontend AI Pandas", "text/plain")}
+        data = {"taxonomy": "string", "events": "string"}
+
+        resp = self.client.post("/upload_and_score", files=files, data=data)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["used_default_taxonomy"])
+        self.assertTrue(body["used_default_events"])
+        self.assertIn("Full-Stack Development", body["domain_scores"])
+        self.assertGreaterEqual(len(body["ranked_events"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
