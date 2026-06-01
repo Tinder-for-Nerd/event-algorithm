@@ -3,3 +3,4 @@ uvicorn[standard]>=0.22.0
 pydantic
 python-multipart
 PyPDF2
+httpx
