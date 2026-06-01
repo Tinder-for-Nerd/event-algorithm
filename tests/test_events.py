@@ -77,6 +77,17 @@ class EventSearchTests(unittest.TestCase):
         self.assertNotIn("Other", body["domain_scores"])
         self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
 
+    def test_upload_resume_uses_default_taxonomy_when_blank(self):
+        files = {"file": ("resume.txt", b"Python Music Director", "text/plain")}
+        data = {"taxonomy": ""}
+
+        resp = self.client.post("/upload_and_score", files=files, data=data)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("domain_scores", body)
+        self.assertIn("Software", body["domain_scores"])
+        self.assertIn("Arts", body["domain_scores"])
+
 
 if __name__ == "__main__":
     unittest.main()

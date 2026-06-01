@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from pathlib import Path
 import json
 import subprocess
 from skillscore_algorithm.core import (
@@ -23,6 +24,33 @@ except Exception:
 
 
 app = FastAPI(title="Skillscore Algorithm API")
+BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_TAXONOMY_PATH = BASE_DIR / "data" / "master_taxonomy.json"
+
+
+def _load_taxonomy_entries(taxonomy: str | None) -> List[SkillTaxonomyEntry]:
+    raw_text = (taxonomy or "").strip()
+    if not raw_text:
+        raw_text = DEFAULT_TAXONOMY_PATH.read_text(encoding="utf-8")
+
+    try:
+        parsed = json.loads(raw_text)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid taxonomy JSON: {e}")
+
+    taxonomy_entries: List[SkillTaxonomyEntry] = []
+    for item in parsed:
+        canonical_name = item.get("canonical_name") or item.get("name")
+        if not canonical_name:
+            continue
+        taxonomy_entries.append(
+            SkillTaxonomyEntry(
+                canonical_name=canonical_name,
+                domain=item.get("domain") or canonical_name,
+                aliases=tuple(item.get("aliases", [])),
+            )
+        )
+    return taxonomy_entries
 
 
 class SkillInput(BaseModel):
@@ -135,24 +163,10 @@ async def upload_and_score(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {e}")
 
-    taxonomy_entries: List[SkillTaxonomyEntry] = []
-    if taxonomy:
-        try:
-            parsed = json.loads(taxonomy)
-            for item in parsed:
-                canonical_name = item.get("canonical_name") or item.get("name")
-                taxonomy_entries.append(
-                    SkillTaxonomyEntry(
-                        canonical_name=canonical_name,
-                        domain=item.get("domain") or canonical_name,
-                        aliases=tuple(item.get("aliases", [])),
-                    )
-                )
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid taxonomy JSON: {e}")
+    taxonomy_entries = _load_taxonomy_entries(taxonomy)
 
     if not taxonomy_entries:
-        raise HTTPException(status_code=400, detail="No taxonomy provided — taxonomy JSON form field is required")
+        raise HTTPException(status_code=400, detail="No valid taxonomy entries found")
 
     extracted = extract_exact_skill_mentions(content, taxonomy_entries)
 
