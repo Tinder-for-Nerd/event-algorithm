@@ -11,7 +11,7 @@ from api.app import app
 
 client = TestClient(app)
 
-sample_pdf = ROOT_DIR / "Vyas_s_resume.pdf"
+sample_pdf = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT_DIR / "Vyas_s_resume.pdf"
 sample_events = [
   {
     "id": "e1",
