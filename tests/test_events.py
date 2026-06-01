@@ -44,6 +44,39 @@ class EventSearchTests(unittest.TestCase):
         # Top result should be the Python event
         self.assertEqual(results[0]["event_id"], "e1")
 
+    def test_upload_resume_returns_domain_scores_and_ranked_events(self):
+        taxonomy = [
+            {"canonical_name": "Python", "domain": "Software", "aliases": ["python"]},
+            {"canonical_name": "Pandas", "domain": "Data", "aliases": ["pandas"]},
+            {"canonical_name": "Music", "domain": "Arts", "aliases": ["music"]},
+        ]
+        events = [
+            {
+                "id": "e1",
+                "title": "Data Python Workshop",
+                "required_skills": {"Python": 0.9, "Pandas": 0.7},
+                "start_time": "2026-06-20T09:00:00+00:00",
+                "popularity": 0.8,
+            },
+            {
+                "id": "e2",
+                "title": "Music and Production Meetup",
+                "required_skills": {"Music": 0.9},
+                "start_time": "2026-06-18T09:00:00+00:00",
+                "popularity": 0.6,
+            },
+        ]
+        files = {"file": ("resume.txt", b"Python Pandas Music", "text/plain")}
+        data = {"taxonomy": json.dumps(taxonomy), "events": json.dumps(events)}
+
+        resp = self.client.post("/upload_and_score", files=files, data=data)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("domain_scores", body)
+        self.assertIn("ranked_events", body)
+        self.assertNotIn("Other", body["domain_scores"])
+        self.assertEqual(body["ranked_events"][0]["event_id"], "e1")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -273,6 +273,14 @@ class Event:
 	metadata: Mapping[str, object] | None = None
 
 
+@dataclass(frozen=True)
+class DomainProfile:
+	domain_scores: Mapping[str, float]
+	top_domain: str | None
+	weighted_skill_vector: Mapping[str, float]
+	total_skill_score: float
+
+
 def _event_recency_score(start_time_iso: Optional[str]) -> float:
 	"""Compute a recency score R in [0,1] based on days until start.
 
@@ -307,13 +315,16 @@ def score_event_for_user(
 	"""
 	config = config or ScoringConfig()
 
-	# Overlap: how much user's skills cover required skills
+	# Direct coverage: how much of the event's required skills the user can satisfy
 	eps = 1e-9
 	numerator = sum(user_skill_scores.get(s, 0.0) * w for s, w in event.required_skills.items())
-	denom = sum(user_skill_scores.values()) + eps
-	overlap = numerator / denom if denom > eps else 0.0
+	user_total = sum(user_skill_scores.values()) + eps
+	required_total = sum(event.required_skills.values()) + eps
+	overlap = numerator / user_total if user_total > eps else 0.0
+	coverage = numerator / required_total if required_total > eps else 0.0
+	similarity = cosine_similarity(user_skill_scores, event.required_skills)
 
-	# Complementarity: benefits when event requires skills the user lacks
+	# Complementarity is tracked for diagnostics, but it should not dominate event ranking.
 	complement = complementarity_score(user_skill_scores, event.required_skills)
 
 	# Recency and popularity
@@ -321,16 +332,60 @@ def score_event_for_user(
 	popularity = _bounded(float(event.popularity)) if event.popularity is not None else 0.0
 
 	final = (
-		config.w1 * overlap + config.w2 * complement + config.w3 * recency + config.w4 * popularity
+		0.55 * coverage
+		+ 0.25 * similarity
+		+ 0.10 * recency
+		+ 0.10 * popularity
 	)
 
 	return {
 		"event_id": event.id,
 		"title": event.title,
 		"overlap": overlap,
+		"coverage": coverage,
+		"similarity": similarity,
 		"complementarity": complement,
 		"recency": recency,
 		"popularity": popularity,
 		"final_score": final,
 	}
+
+
+def build_domain_profile(scored_skills: Sequence[SkillScore]) -> DomainProfile:
+	"""Build a domain-weighted profile from every detected skill.
+
+	Each domain gets a percentage score. The highest domains get more influence in the
+	final weighted skill vector, so event ranking reflects the user's strongest area.
+	"""
+	if not scored_skills:
+		return DomainProfile(domain_scores={}, top_domain=None, weighted_skill_vector={}, total_skill_score=0.0)
+
+	raw_domain_totals: dict[str, float] = {}
+	for skill in scored_skills:
+		raw_domain_totals[skill.domain] = raw_domain_totals.get(skill.domain, 0.0) + max(0.0, skill.final_score)
+
+	total = sum(raw_domain_totals.values())
+	if total <= 0.0:
+		weighted_skill_vector = {skill.name: skill.final_score for skill in scored_skills}
+		return DomainProfile(
+			domain_scores={domain: 0.0 for domain in raw_domain_totals},
+			top_domain=max(raw_domain_totals, key=raw_domain_totals.get) if raw_domain_totals else None,
+			weighted_skill_vector=weighted_skill_vector,
+			total_skill_score=0.0,
+		)
+
+	domain_scores = {domain: score / total for domain, score in raw_domain_totals.items()}
+	top_domain = max(domain_scores, key=domain_scores.get) if domain_scores else None
+
+	weighted_skill_vector: dict[str, float] = {}
+	for skill in scored_skills:
+		domain_weight = domain_scores.get(skill.domain, 0.0)
+		weighted_skill_vector[skill.name] = skill.final_score * (1.0 + domain_weight)
+
+	return DomainProfile(
+		domain_scores=domain_scores,
+		top_domain=top_domain,
+		weighted_skill_vector=weighted_skill_vector,
+		total_skill_score=sum(skill.final_score for skill in scored_skills) / len(scored_skills),
+	)
 

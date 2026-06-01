@@ -13,6 +13,7 @@ from skillscore_algorithm.core import (
     extract_exact_skill_mentions,
     Event,
     score_event_for_user,
+    build_domain_profile,
 )
 import io
 try:
@@ -52,6 +53,14 @@ class SearchEventsRequest(BaseModel):
     skills: List[SkillInput]
     events: List[EventInput]
     top_k: int = 10
+
+
+class UploadEventInput(BaseModel):
+    id: str
+    title: str
+    required_skills: Dict[str, float]
+    start_time: str | None = None
+    popularity: float | None = 0.5
 
 
 @app.post("/score_skill")
@@ -101,6 +110,7 @@ def api_combine(req: CombineRequest):
 async def upload_and_score(
     file: UploadFile = File(...),
     taxonomy: str | None = Form(None),
+    events: str | None = Form(None),
     role_months: float = Form(12.0),
     months_since_use: float = Form(1.0),
     seniority_level: str = Form("used"),
@@ -130,10 +140,11 @@ async def upload_and_score(
         try:
             parsed = json.loads(taxonomy)
             for item in parsed:
+                canonical_name = item.get("canonical_name") or item.get("name")
                 taxonomy_entries.append(
                     SkillTaxonomyEntry(
-                        canonical_name=item.get("canonical_name") or item.get("name"),
-                        domain=item.get("domain", "Unknown"),
+                        canonical_name=canonical_name,
+                        domain=item.get("domain") or canonical_name,
                         aliases=tuple(item.get("aliases", [])),
                     )
                 )
@@ -146,6 +157,7 @@ async def upload_and_score(
     extracted = extract_exact_skill_mentions(content, taxonomy_entries)
 
     results = []
+    scored_skills = []
     for ex in extracted:
         evidence = SkillEvidence(
             name=ex.canonical_name,
@@ -157,25 +169,58 @@ async def upload_and_score(
             self_reported_level=self_reported_level,
         )
         scored = score_skill(evidence, ScoringConfig())
+        scored_skills.append(scored)
         results.append({"extracted": ex.__dict__, "score": scored.__dict__})
 
-    return {"file": file.filename, "results": results}
+    profile = build_domain_profile(scored_skills)
+
+    ranked_events = []
+    if events:
+        try:
+            parsed_events = json.loads(events)
+            for item in parsed_events:
+                event_obj = Event(
+                    id=item["id"],
+                    title=item["title"],
+                    required_skills=item["required_skills"],
+                    start_time=item.get("start_time"),
+                    popularity=item.get("popularity", 0.5),
+                )
+                ranked_events.append(score_event_for_user(profile.weighted_skill_vector, event_obj, ScoringConfig()))
+            ranked_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid events JSON: {e}")
+
+    return {
+        "file": file.filename,
+        "results": results,
+        "domain_scores": profile.domain_scores,
+        "top_domain": profile.top_domain,
+        "total_skill_score": profile.total_skill_score,
+        "weighted_skill_vector": profile.weighted_skill_vector,
+        "ranked_events": ranked_events,
+    }
 
 
 @app.post("/search_events")
 def search_events(req: SearchEventsRequest):
     # Build user skill scores
-    scored = [score_skill(SkillEvidence(**s.dict()), ScoringConfig()) for s in req.skills]
-    user_vector = {s.name: s.final_score for s in scored}
-    scored_count = len([s for s in scored if s.final_score > 0])
+    scored = [score_skill(SkillEvidence(**s.model_dump()), ScoringConfig()) for s in req.skills]
+    profile = build_domain_profile(scored)
 
     # Score each event
     scored_events = []
     for ev in req.events:
         event_obj = Event(id=ev.id, title=ev.title, required_skills=ev.required_skills, start_time=ev.start_time, popularity=ev.popularity or 0.5)
-        details = score_event_for_user(user_vector, event_obj, ScoringConfig())
+        details = score_event_for_user(profile.weighted_skill_vector, event_obj, ScoringConfig())
         scored_events.append(details)
 
     # Sort by final_score desc
     scored_events.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
-    return {"top_k": req.top_k, "results": scored_events[: req.top_k]}
+    return {
+        "top_k": req.top_k,
+        "domain_scores": profile.domain_scores,
+        "top_domain": profile.top_domain,
+        "total_skill_score": profile.total_skill_score,
+        "results": scored_events[: req.top_k],
+    }
