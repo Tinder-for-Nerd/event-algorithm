@@ -14,6 +14,8 @@ class EventSearchTests(unittest.TestCase):
         resp = self.client.get("/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Skillscore FastAPI Demo", resp.text)
+        self.assertIn("Result", resp.text)
+        self.assertIn("Upload and Score", resp.text)
 
     def test_search_events_prefers_matching_skills(self):
         payload = {

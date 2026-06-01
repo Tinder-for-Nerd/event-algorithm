@@ -121,15 +121,79 @@ def home_page() -> HTMLResponse:
         return HTMLResponse(
                 """
                 <html>
-                    <head><title>Skillscore FastAPI Demo</title></head>
-                    <body style="font-family: Arial, sans-serif; max-width: 720px; margin: 40px auto; line-height: 1.5;">
-                        <h1>Skillscore FastAPI Demo</h1>
-                        <p>Upload a resume PDF or text file. The API will use the built-in taxonomy and sample events automatically.</p>
-                        <form action="/upload_and_score" method="post" enctype="multipart/form-data">
-                            <p><input type="file" name="file" accept=".pdf,.txt" required></p>
-                            <p><button type="submit">Upload and Score</button></p>
-                        </form>
-                        <p>For JSON APIs, use <code>/docs</code> or call <code>/upload_and_score</code> directly.</p>
+                    <head>
+                        <title>Skillscore FastAPI Demo</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; max-width: 860px; margin: 40px auto; line-height: 1.5; padding: 0 16px; }
+                            .card { border: 1px solid #d7dbe3; border-radius: 14px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+                            textarea, input[type="file"] { width: 100%; box-sizing: border-box; }
+                            textarea { min-height: 120px; font-family: Consolas, monospace; }
+                            button { padding: 10px 16px; border: 0; border-radius: 10px; background: #111827; color: #fff; cursor: pointer; }
+                            pre { white-space: pre-wrap; word-break: break-word; background: #0b1020; color: #d1e7ff; padding: 16px; border-radius: 12px; overflow-x: auto; }
+                            .muted { color: #5b6475; }
+                            .row { display: grid; grid-template-columns: 1fr; gap: 14px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="card">
+                            <h1>Skillscore FastAPI Demo</h1>
+                            <p class="muted">Upload a resume PDF or text file. The API uses the built-in taxonomy and sample events automatically, and the result appears below.</p>
+                            <form id="upload-form">
+                                <div class="row">
+                                    <label>
+                                        Resume file
+                                        <input type="file" name="file" accept=".pdf,.txt" required>
+                                    </label>
+                                    <label>
+                                        Optional events JSON
+                                        <textarea name="events" placeholder='Leave blank to use the built-in sample events'></textarea>
+                                    </label>
+                                    <label>
+                                        Optional taxonomy JSON
+                                        <textarea name="taxonomy" placeholder='Leave blank to use the built-in taxonomy'></textarea>
+                                    </label>
+                                    <div>
+                                        <button type="submit">Upload and Score</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="card" style="margin-top: 20px;">
+                            <h2>Result</h2>
+                            <pre id="output">Upload a file to see the result here.</pre>
+                        </div>
+
+                        <script>
+                            const form = document.getElementById('upload-form');
+                            const output = document.getElementById('output');
+
+                            form.addEventListener('submit', async (event) => {
+                                event.preventDefault();
+                                output.textContent = 'Uploading...';
+
+                                const formData = new FormData(form);
+                                const response = await fetch('/upload_and_score', {
+                                    method: 'POST',
+                                    body: formData,
+                                });
+
+                                let payload;
+                                try {
+                                    payload = await response.json();
+                                } catch (error) {
+                                    output.textContent = 'Could not parse response: ' + error;
+                                    return;
+                                }
+
+                                if (!response.ok) {
+                                    output.textContent = JSON.stringify(payload, null, 2);
+                                    return;
+                                }
+
+                                output.textContent = JSON.stringify(payload, null, 2);
+                            });
+                        </script>
                     </body>
                 </html>
                 """
